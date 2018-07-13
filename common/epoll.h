@@ -27,12 +27,12 @@ public:
 
 	int DelDevent(int iFD);
 
-	int LoopOnce(int iTimeoutMS);
+	int LoopOnce(int listenfd,int iTimeoutMS);
 
 	int GetLoopErrorMsg(char *pErrMsg, int iMsgStrLen);
 
 	int OnRead(int fd,char *buf);
-	int OnWrite(int fd,char *buf);
+//	int OnWrite(int fd,char *buf);
 	//int OnError(int fd,char *buf,int reason);
 protected:
 

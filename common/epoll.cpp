@@ -1,6 +1,15 @@
 #include "epoll.h"
-#include <string.h>
+
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <sys/epoll.h>
+#include <unistd.h>
+#include <sys/types.h>
 
 
 SGEpollEventLoop::SGEpollEventLoop(int iEpollEventSize) :
@@ -55,9 +64,7 @@ int SGEpollEventLoop::AddEvent(int iFD, int iEventType)
 	{
 		stOneEpollEvent.events |= EPOLLOUT;
 	}
-	printf("1234");
-	printf("%d\n",m_iEpollFD);
-	printf("12345");
+	stOneEpollEvent.events |= EPOLLET;
 	//ִ添加监听
 	iRet = epoll_ctl(m_iEpollFD, EPOLL_CTL_ADD, iFD, &stOneEpollEvent);
 
@@ -116,7 +123,7 @@ int SGEpollEventLoop::DelDevent(int iFD)
 	return 0;
 }
 
-int SGEpollEventLoop::LoopOnce(int iTimeoutMS)
+int SGEpollEventLoop::LoopOnce(int listenfd,int iTimeoutMS)
 {
 	//ERROR_LOG("THERE is a message arrive111111111111111 %d\n",2);
 	int iEpollEventNumber;
@@ -142,7 +149,6 @@ int SGEpollEventLoop::LoopOnce(int iTimeoutMS)
 		unsigned int uiEpollEvent = m_pstEpollEvent[i].events;
 		int iRealFD = ui64FD;
 		TObjMixID iObjID = static_cast<TObjMixID>(ui64FD);
-
 		if ((EPOLLERR | EPOLLHUP) & uiEpollEvent)
 		{
 		//	OnError(iRealFD, this,iObjID,uiEpollEvent);
@@ -151,13 +157,31 @@ int SGEpollEventLoop::LoopOnce(int iTimeoutMS)
 		{
 			if ((EPOLLIN)& uiEpollEvent)
 			{
-				ERROR_LOG("THERE is a message arrive %d\n",2);
-				OnRead(iRealFD, this);
+				if (iRealFD == listenfd)
+				{
+					int clifd;
+					struct sockaddr_in cliaddr;
+					socklen_t  cliaddrlen;
+					clifd = accept(listenfd,(struct sockaddr*)&cliaddr,&cliaddrlen);
+					if (clifd == -1)
+ 						perror("accpet error:");
+					else
+					{
+   						printf("accept a new client: %s:%d\n",inet_ntoa(cliaddr.sin_addr),cliaddr.sin_port);
+  
+    						AddEvent(clifd, EventType_Read);
+					}
+				}
+				else
+				{
+					char buf[1024];
+					OnRead(iRealFD,buf);	
+				}
 			}
 			if ((EPOLLOUT)& uiEpollEvent)
 			{
 				ERROR_LOG("THERE is a message arrive %d\n",3);
-				OnWrite(iRealFD, this);
+//				OnWrite(iRealFD, this);
 			}
 		}
 	}
@@ -167,31 +191,36 @@ int SGEpollEventLoop::LoopOnce(int iTimeoutMS)
 
 int SGEpollEventLoop::OnRead(int fd,char *buf)
 {
-	int nread;
-    nread = read(fd,buf,MAXSIZE);
-        if (nread == -1)
+    int nread = read(fd,buf,1024);
+    if (nread == -1)
     {
         ERROR_LOG("read error:");
         close(fd);
+		//delete_event(m_iEpollFD,fd,EPOLLIN);
     }
     else if (nread == 0)
     {
-        fprintf(stderr,"server close.\n");
+        ERROR_LOG("fd close");
         close(fd);
+		//delete_event(m_iEpollFD,fd,EPOLLIN);
     }
     else
     {
-        if (fd == STDIN_FILENO)
-            add_event(m_iEpollFD,sockfd,EPOLLOUT);
-        else
-        {
-            delete_event(m_iEpollFD,sockfd,EPOLLIN);
-            add_event(m_iEpollFD,STDOUT_FILENO,EPOLLOUT);
-        }
+        const uint8_t* p = (const uint8_t*)buf;
+		uint16_t size = *(uint16_t*)p;
+		p += sizeof(uint16_t);
+
+		uint32_t dest = ntohl(*(uint32_t*)p);
+		p += sizeof(uint32_t);
+
+		uint32_t msgid = ntohl(*(uint32_t*)p);
+		p += sizeof(uint32_t);
+		printf("%d,%d,%d\n",size,dest,msgid);
+		//modify_event(m_iEpollFD,fd,EPOLLOUT);
 	}
 	return 0;
 }
-
+/*
 int SGEpollEventLoop::OnWrite(int fd,char *buf)
 {
 	int nwrite;
@@ -209,7 +238,7 @@ int SGEpollEventLoop::OnWrite(int fd,char *buf)
             modify_event(epollfd,fd,EPOLLIN);
     }
     memset(buf,0,MAXSIZE);
-}
+}*/
 
 int SGEpollEventLoop::GetLoopErrorMsg(char *pErrMsg, int iMsgStrLen)
 {
